@@ -1,70 +1,75 @@
-# Getting Started with Create React App
+# Simple Timetable Planner
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A browser-based scheduling tool that auto-generates weekly timetables for classes, staff, and tasks from CSV data. It randomly (or deterministically, via a seed) places every assignment into a 5-day / 30-minute-slot grid while respecting each class's and each person's availability, then lets you review, manually fix up, and export the result.
 
-## Available Scripts
+Built with React (Create React App) and Tailwind CSS, this runs entirely client-side — no backend or database. All scheduling logic executes in the browser, and Firebase Hosting is used only to serve the static build.
 
-In the project directory, you can run:
+## How it works
 
-### `npm start`
+1. **Load data** — upload five CSVs (or click "Load Sample Data" for a quick demo):
+   - `classes.csv` — `id, Name`
+   - `person.csv` — `id, Name`
+   - `5264-tasks.csv` — `id, Name, Duration` (duration in 30-minute slots)
+   - `5624-assignments.csv` — `id, Main, Assist, Task, Class` (who teaches/assists what task for which class)
+   - `5264-immutable.csv` — `id, Class, Day, Slot, Duration, Task` (fixed, non-negotiable slots, e.g. pre-scheduled sessions)
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+   Sample CSVs for all five are in [`data/`](data).
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+2. **Review assignments** — the assignments grid lets you enable/disable individual assignments before generating a schedule.
 
-### `npm test`
+3. **Generate a schedule** — the scheduler:
+   - Builds an availability tracker per class and per person across 5 days × 20 slots/day.
+   - Assigns a random lunch break window per day.
+   - Applies immutable (fixed) slots first, then any assignments you've manually locked in place.
+   - Shuffles the remaining assignments (seeded or fully random) and sorts them by descending task duration, then places each one in the first day/slot where the class, main person, and assist person are all free.
+   - Retries up to a configurable number of times (with different shuffles) until every assignment is placed, or reports what couldn't be scheduled.
+   - Optional toggles allow scheduling before 8:30am or after 5:30pm.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+4. **Adjust the result** — the timetable viewer supports drag-and-drop rescheduling, locking placements so they survive regeneration, and surfaces any tasks that couldn't be auto-assigned so you can place them manually.
 
-### `npm run build`
+5. **Review workload** — a staff workload table summarizes hours/assignments per person.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+6. **Export or save** — export the finished timetables to a styled XLSX workbook, or save/load the full application state (data + generated schedule) as a JSON file to resume later.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Getting started
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+npm install
+npm start
+```
 
-### `npm run eject`
+Runs the app in development mode at [http://localhost:3000](http://localhost:3000).
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+Other scripts:
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm test        # run tests (react-scripts test)
+npm run build   # production build to ./build
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Project structure
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```
+src/
+  components/     UI: file upload, assignments grid, control panel,
+                   timetable viewer/grid, staff workload, unassigned tasks, logs
+  hooks/          useCSVData (CSV/state loading), useScheduler (scheduling
+                   orchestration + retries), useLogger
+  services/
+    scheduler.js        Core scheduling algorithm (trackers, lunch breaks,
+                         immutable/locked slots, placement, retries)
+    assignmentHelper.js Assignment lookup/formatting helpers
+  utils/          csvParser, exportUtils (XLSX export), colorUtils,
+                   timeUtils, randomUtils (seeded shuffling)
+  constants.js    Days, slots-per-day, lunch options, color palette
+data/             Sample CSVs (classes, persons, tasks, assignments, immutable slots)
+```
 
-## Learn More
+## Deployment
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+The app is deployed as a static site on Firebase Hosting. See [FIREBASE_DEPLOYMENT.md](FIREBASE_DEPLOYMENT.md) for the full setup and deploy walkthrough; in short:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```bash
+npm run build
+firebase deploy
+```
