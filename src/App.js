@@ -43,7 +43,7 @@ const App = () => {
   // Track which assignments are enabled for scheduling (default: all enabled)
   const [enabledAssignmentIds, setEnabledAssignmentIds] = useState(new Set());
   const [allowBeyond530, setAllowBeyond530] = useState(false);
-  const [allowBefore830, setAllowBefore830] = useState(false);
+  const [allowBefore900, setAllowBefore900] = useState(false);
   const [lockedAssignmentIds, setLockedAssignmentIds] = useState(new Set());
 
   // When assignments load/change, enable all of them by default
@@ -129,7 +129,7 @@ const App = () => {
     setAllScheduled,
     unassignedTasks,
     setUnassignedTasks
-  } = useScheduler(filteredCsvData, addLog, getDetails, allowBeyond530, allowBefore830, disabledAssignmentIds, lockedAssignmentIds, timetablesRef);
+  } = useScheduler(filteredCsvData, addLog, getDetails, allowBeyond530, allowBefore900, disabledAssignmentIds, lockedAssignmentIds, timetablesRef);
 
   // Keep ref synced with latest timetables
   useEffect(() => { timetablesRef.current = timetables; }, [timetables]);
@@ -305,8 +305,8 @@ const App = () => {
           onUpdateTimetables={setTimetables}
           allowBeyond530={allowBeyond530}
           onAllowBeyond530Change={setAllowBeyond530}
-          allowBefore830={allowBefore830}
-          onAllowBefore830Change={setAllowBefore830}
+          allowBefore900={allowBefore900}
+          onAllowBefore900Change={setAllowBefore900}
           unassignedTasks={unassignedTasks}
           onUpdateUnassignedTasks={setUnassignedTasks}
           lockedAssignmentIds={lockedAssignmentIds}

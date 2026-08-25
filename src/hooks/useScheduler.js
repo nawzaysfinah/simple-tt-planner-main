@@ -11,7 +11,7 @@ import { getSlotLabel } from '../utils/timeUtils';
  * @param {Function} getAssignmentDetails - Function to get assignment details
  * @returns {Object} Scheduler state and methods
  */
-export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond530 = false, allowBefore830 = false, disabledAssignmentIds = [], lockedAssignmentIds = new Set(), timetablesRef = { current: {} }) => {
+export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond530 = false, allowBefore900 = false, disabledAssignmentIds = [], lockedAssignmentIds = new Set(), timetablesRef = { current: {} }) => {
     const [timetables, setTimetables] = useState({});
     const [successfulAttempt, setSuccessfulAttempt] = useState(null);
     const [allScheduled, setAllScheduled] = useState(false);
@@ -83,7 +83,7 @@ export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond5
                 addLog,
                 randomSeed,
                 allowBeyond530,
-                allowBefore830,
+                allowBefore900,
                 lockedPlacements
             );
 
@@ -114,7 +114,7 @@ export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond5
         setAllScheduled(false);
         setUnassignedTasks([...(bestResult.unassignedTasks || []), ...disabledAssignmentIds]);
 
-    }, [assignments, tasks, classes, persons, immutableSlots, maxRetries, randomSeed, addLog, allowBeyond530, allowBefore830, disabledAssignmentIds, lockedAssignmentIds]);
+    }, [assignments, tasks, classes, persons, immutableSlots, maxRetries, randomSeed, addLog, allowBeyond530, allowBefore900, disabledAssignmentIds, lockedAssignmentIds]);
 
     const handleExport = useCallback(() => {
         if (!allScheduled || successfulAttempt === null) {

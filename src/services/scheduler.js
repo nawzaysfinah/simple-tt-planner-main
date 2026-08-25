@@ -1,4 +1,4 @@
-import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY } from '../constants';
+import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY, CLASS_GAP_PENALTY, DEFAULT_EARLIEST_START_SLOT } from '../constants';
 import { getSlotLabel } from '../utils/timeUtils';
 import { seededRandom, shuffleArray } from '../utils/randomUtils';
 import { getModuleFromTask } from './assignmentHelper';
@@ -88,7 +88,9 @@ export const initializeTrackers = (classes, persons, assignments, logger) => {
 };
 
 /**
- * Apply random lunch breaks to all trackers
+ * Apply a random lunch break to all trackers. The same lunch slot is used for
+ * every day of the week (not re-picked per day), and for every class and every
+ * person, so the whole team is free to eat lunch together at the same time each day.
  * @param {Object} classTrackers - Class availability trackers
  * @param {Object} personTrackers - Person availability trackers
  * @param {Object} timetables - Timetable data
@@ -98,9 +100,9 @@ export const initializeTrackers = (classes, persons, assignments, logger) => {
 export const applyLunchBreaks = (classTrackers, personTrackers, timetables, logger) => {
     const lunchBreaks = {};
 
-    // Randomly choose lunch slots for each day
+    // Choose one lunch slot and reuse it Monday-Friday
+    const lunchSlots = LUNCH_OPTIONS[Math.floor(Math.random() * LUNCH_OPTIONS.length)];
     for (let day = 0; day < 5; day++) {
-        const lunchSlots = LUNCH_OPTIONS[Math.floor(Math.random() * LUNCH_OPTIONS.length)];
         lunchBreaks[day] = lunchSlots;
         logger(`${DAYS[day]} lunch break: slots ${lunchSlots[0] + 1} -${lunchSlots[1] + 1} (${getSlotLabel(lunchSlots[0])} to ${getSlotLabel(lunchSlots[1])})`);
     }
@@ -186,7 +188,7 @@ export const applyImmutableSlots = (immutableSlots, classTrackers, timetables, l
  * @param {string|number} randomSeed - Optional random seed
  * @returns {Object} { success, scheduled, failed, timetables }
  */
-export const attemptSchedule = (assignments, tasks, classes, persons, immutableSlots, attemptNumber, logger, randomSeed = null, allowBeyond530 = false, allowBefore830 = false, lockedPlacements = []) => {
+export const attemptSchedule = (assignments, tasks, classes, persons, immutableSlots, attemptNumber, logger, randomSeed = null, allowBeyond530 = false, allowBefore900 = false, lockedPlacements = []) => {
     // Initialize timetables
     const newTimetables = {};
 
@@ -322,13 +324,15 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
         }
 
         // Collect every open slot for this task, then score each candidate against
-        // two soft preferences for the Main lecturer: avoid repeating the same module
-        // on one day, and cluster their teaching onto as few days as possible.
-        // Scoring only ranks slots that are already valid, so it never makes a task
-        // unschedulable that would otherwise have fit - if every open slot violates a
-        // preference, the least-bad one is used rather than leaving the task unplaced.
+        // three soft preferences: (1) for the Main lecturer, avoid repeating the same
+        // module on one day, (2) for the Main lecturer, cluster their teaching onto as
+        // few days as possible, (3) for the class, avoid leaving a blank period between
+        // sessions on a day that already has bookings. Scoring only ranks slots that are
+        // already valid, so it never makes a task unschedulable that would otherwise have
+        // fit - if every open slot violates a preference, the least-bad one is used rather
+        // than leaving the task unplaced.
         let placed = false;
-        const startSlot = allowBefore830 ? 0 : 1;
+        const startSlot = allowBefore900 ? 0 : DEFAULT_EARLIEST_START_SLOT;
         const maxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
 
         const candidates = [];
@@ -349,6 +353,14 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
             const teachingDays = mainTeachingDays.get(mainPerson);
             const modulesByDay = mainModulesByDay.get(mainPerson);
 
+            // Per day, does this class already have any booking? Used below to tell an
+            // isolated (gap-prone) placement apart from the day's first booking, which
+            // can't create a gap since nothing else exists yet to leave a gap from.
+            const classDayHasBooking = {};
+            for (let day = 0; day < 5; day++) {
+                classDayHasBooking[day] = classTrackers[className][day].some(v => v !== 0);
+            }
+
             let bestScore = Infinity;
             let bestCandidates = [];
 
@@ -360,6 +372,13 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
 
                 const opensNewDay = !!(teachingDays && teachingDays.size > 0 && !teachingDays.has(candidate.day));
                 if (opensNewDay) score += NEW_TEACHING_DAY_PENALTY;
+
+                const dayTrack = classTrackers[className][candidate.day];
+                const leftBusy = candidate.slot > 0 && dayTrack[candidate.slot - 1] !== 0;
+                const rightIdx = candidate.slot + duration;
+                const rightBusy = rightIdx < SLOTS_PER_DAY && dayTrack[rightIdx] !== 0;
+                const createsGap = classDayHasBooking[candidate.day] && !leftBusy && !rightBusy;
+                if (createsGap) score += CLASS_GAP_PENALTY;
 
                 if (score < bestScore) {
                     bestScore = score;
