@@ -1,4 +1,4 @@
-import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY, CLASS_GAP_PENALTY, DEFAULT_EARLIEST_START_SLOT } from '../constants';
+import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY, CLASS_GAP_PENALTY, FRIDAY_PENALTY, FRIDAY_AFTERNOON_START_SLOT, FRIDAY_DAY_INDEX, DEFAULT_EARLIEST_START_SLOT } from '../constants';
 import { getSlotLabel } from '../utils/timeUtils';
 import { seededRandom, shuffleArray } from '../utils/randomUtils';
 import { getModuleFromTask } from './assignmentHelper';
@@ -324,20 +324,26 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
         }
 
         // Collect every open slot for this task, then score each candidate against
-        // three soft preferences: (1) for the Main lecturer, avoid repeating the same
+        // four soft preferences: (1) for the Main lecturer, avoid repeating the same
         // module on one day, (2) for the Main lecturer, cluster their teaching onto as
         // few days as possible, (3) for the class, avoid leaving a blank period between
-        // sessions on a day that already has bookings. Scoring only ranks slots that are
-        // already valid, so it never makes a task unschedulable that would otherwise have
-        // fit - if every open slot violates a preference, the least-bad one is used rather
-        // than leaving the task unplaced.
+        // sessions on a day that already has bookings, (4) avoid Friday altogether where
+        // possible. Scoring only ranks slots that are already valid, so it never makes a
+        // task unschedulable that would otherwise have fit - if every open slot violates a
+        // preference, the least-bad one is used rather than leaving the task unplaced.
+        //
+        // Friday afternoon is the one HARD rule (not scored): management wants explicitly
+        // no classes there, so a session may not start, or run past, FRIDAY_AFTERNOON_START_SLOT
+        // on a Friday - such placements are excluded from the candidate list entirely and can
+        // leave a task in Unassigned Tasks rather than ever landing there.
         let placed = false;
         const startSlot = allowBefore900 ? 0 : DEFAULT_EARLIEST_START_SLOT;
         const maxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
 
         const candidates = [];
         for (let day = 0; day < 5; day++) {
-            for (let slot = startSlot; slot <= maxSlots - duration; slot++) {
+            const dayMaxSlots = day === FRIDAY_DAY_INDEX ? Math.min(maxSlots, FRIDAY_AFTERNOON_START_SLOT) : maxSlots;
+            for (let slot = startSlot; slot <= dayMaxSlots - duration; slot++) {
                 const classAvailable = checkAvailability(classTrackers[className], day, slot, duration);
                 const mainAvailable = checkAvailability(personTrackers[mainPerson], day, slot, duration);
                 const assistAvailable = assistPerson ? checkAvailability(personTrackers[assistPerson], day, slot, duration) : true;
@@ -379,6 +385,10 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
                 const rightBusy = rightIdx < SLOTS_PER_DAY && dayTrack[rightIdx] !== 0;
                 const createsGap = classDayHasBooking[candidate.day] && !leftBusy && !rightBusy;
                 if (createsGap) score += CLASS_GAP_PENALTY;
+
+                // Any Friday candidate that survives the hard afternoon filter above is,
+                // by definition, a Friday morning (or pre-1pm) slot - discourage it too.
+                if (candidate.day === FRIDAY_DAY_INDEX) score += FRIDAY_PENALTY;
 
                 if (score < bestScore) {
                     bestScore = score;
