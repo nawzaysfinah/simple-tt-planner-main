@@ -43,6 +43,19 @@ export const getAssignmentDetails = (assignmentId, assignments, immutableSlots =
 };
 
 /**
+ * Extract the module abbreviation from a task name.
+ * Tasks are named "{ModuleAbbreviation}-{T|P}{n}", e.g. "CVA-T1" -> "CVA",
+ * "IP-P1" -> "IP". Falls back to the full task name if no separator is found.
+ * @param {string} taskName - Task name
+ * @returns {string} Module abbreviation
+ */
+export const getModuleFromTask = (taskName) => {
+    if (!taskName) return taskName;
+    const idx = taskName.lastIndexOf('-');
+    return idx === -1 ? taskName : taskName.slice(0, idx);
+};
+
+/**
  * Validate assignment CSV structure
  * @param {Array} assignments - Parsed assignments
  * @returns {Object} { valid: boolean, missingFields: Array }
