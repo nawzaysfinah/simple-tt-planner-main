@@ -53,13 +53,14 @@ export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond5
                     const className = assignment.Class || assignment.class;
                     const mainPerson = assignment.Main || assignment.main;
                     const assistPerson = assignment.Assist || assignment.assist;
+                    const taskName = assignment.Task || assignment.task;
                     const classTable = timetablesRef.current[className];
                     if (!classTable) continue;
                     // Find all (day, slot) for this assignment in the class timetable
                     for (let d = 0; d < 5; d++) {
                         for (let s = 0; s < classTable[d].length; s++) {
                             if (classTable[d][s] === aid) {
-                                lockedPlacements.push({ assignmentId: aid, className, mainPerson, assistPerson, day: d, slot: s });
+                                lockedPlacements.push({ assignmentId: aid, className, mainPerson, assistPerson, day: d, slot: s, taskName });
                             }
                         }
                     }

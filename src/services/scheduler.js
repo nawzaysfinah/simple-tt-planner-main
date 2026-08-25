@@ -1,6 +1,7 @@
-import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID } from '../constants';
+import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY } from '../constants';
 import { getSlotLabel } from '../utils/timeUtils';
 import { seededRandom, shuffleArray } from '../utils/randomUtils';
+import { getModuleFromTask } from './assignmentHelper';
 
 /**
  * Check if a time slot range is available
@@ -197,6 +198,24 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
         newTimetables[className] = Array(5).fill(null).map(() => Array(SLOTS_PER_DAY).fill(0));
     });
 
+    // Track each Main lecturer's teaching-day clustering and per-day module usage.
+    // Used only as a soft preference when choosing where to place a task (see below) -
+    // Assist-role sessions are intentionally not tracked here.
+    const mainTeachingDays = new Map();  // personName -> Set<dayIndex> they already teach as Main
+    const mainModulesByDay = new Map();  // personName -> Map<dayIndex, Set<moduleAbbreviation>>
+
+    const recordMainPlacement = (personName, day, taskName) => {
+        if (!personName) return;
+
+        if (!mainTeachingDays.has(personName)) mainTeachingDays.set(personName, new Set());
+        mainTeachingDays.get(personName).add(day);
+
+        if (!mainModulesByDay.has(personName)) mainModulesByDay.set(personName, new Map());
+        const byDay = mainModulesByDay.get(personName);
+        if (!byDay.has(day)) byDay.set(day, new Set());
+        byDay.get(day).add(getModuleFromTask(taskName));
+    };
+
     // Apply lunch breaks
     applyLunchBreaks(classTrackers, personTrackers, newTimetables, logger);
 
@@ -207,7 +226,7 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
     if (lockedPlacements.length > 0) {
         const lockedIds = new Set(lockedPlacements.map(lp => lp.assignmentId));
 
-        for (const { assignmentId, className, mainPerson, assistPerson, day, slot } of lockedPlacements) {
+        for (const { assignmentId, className, mainPerson, assistPerson, day, slot, taskName } of lockedPlacements) {
             // Place in class timetable and tracker
             if (newTimetables[className]) {
                 newTimetables[className][day][slot] = assignmentId;
@@ -222,12 +241,16 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
             if (assistPerson && personTrackers[assistPerson]) {
                 personTrackers[assistPerson][day][slot] = assignmentId;
             }
+            // Count this locked slot towards the Main lecturer's clustering/no-repeat preference
+            recordMainPlacement(mainPerson, day, taskName);
         }
 
         logger(`Pre-placed ${lockedPlacements.length} slots for ${lockedIds.size} locked assignments`);
     }
 
-    // Shuffle assignments for random allocation, then sort by descending task duration
+    // Shuffle assignments for random allocation, then sort by descending task duration.
+    // `rng` is also reused below to break ties between equally-preferred slots.
+    let rng = Math.random;
     let shuffledAssignments;
     if (randomSeed) {
         // Create deterministic seed for this attempt
@@ -237,11 +260,11 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
             hash = ((hash << 5) - hash) + combinedSeed.charCodeAt(i);
             hash |= 0;
         }
-        const rng = seededRandom(hash);
+        rng = seededRandom(hash);
         shuffledAssignments = shuffleArray(assignments, rng);
         logger(`  Using deterministic shuffle with seed: ${combinedSeed} `);
     } else {
-        shuffledAssignments = [...assignments].sort(() => Math.random() - 0.5);
+        shuffledAssignments = shuffleArray(assignments, rng);
     }
 
     // Sort by descending task duration (longest first) after shuffling
@@ -298,33 +321,74 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
             continue;
         }
 
-        // Try to find an available slot
+        // Collect every open slot for this task, then score each candidate against
+        // two soft preferences for the Main lecturer: avoid repeating the same module
+        // on one day, and cluster their teaching onto as few days as possible.
+        // Scoring only ranks slots that are already valid, so it never makes a task
+        // unschedulable that would otherwise have fit - if every open slot violates a
+        // preference, the least-bad one is used rather than leaving the task unplaced.
         let placed = false;
         const startSlot = allowBefore830 ? 0 : 1;
         const maxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
 
-        for (let day = 0; day < 5 && !placed; day++) {
-            for (let slot = startSlot; slot <= maxSlots - duration && !placed; slot++) {
+        const candidates = [];
+        for (let day = 0; day < 5; day++) {
+            for (let slot = startSlot; slot <= maxSlots - duration; slot++) {
                 const classAvailable = checkAvailability(classTrackers[className], day, slot, duration);
                 const mainAvailable = checkAvailability(personTrackers[mainPerson], day, slot, duration);
                 const assistAvailable = assistPerson ? checkAvailability(personTrackers[assistPerson], day, slot, duration) : true;
 
                 if (classAvailable && mainAvailable && assistAvailable) {
-                    // Assign the task
-                    for (let i = 0; i < duration; i++) {
-                        newTimetables[className][day][slot + i] = assignmentId;
-                        classTrackers[className][day][slot + i] = assignmentId;
-                        personTrackers[mainPerson][day][slot + i] = assignmentId;
-                        if (assistPerson) {
-                            personTrackers[assistPerson][day][slot + i] = assignmentId;
-                        }
-                    }
-
-                    logger(`  ✓ Scheduled on ${DAYS[day]}, slots ${slot + 1} -${slot + duration} `, 'info');
-                    scheduled++;
-                    placed = true;
+                    candidates.push({ day, slot });
                 }
             }
+        }
+
+        if (candidates.length > 0) {
+            const module = getModuleFromTask(taskName);
+            const teachingDays = mainTeachingDays.get(mainPerson);
+            const modulesByDay = mainModulesByDay.get(mainPerson);
+
+            let bestScore = Infinity;
+            let bestCandidates = [];
+
+            for (const candidate of candidates) {
+                let score = 0;
+
+                const sameModuleToday = !!(modulesByDay && modulesByDay.get(candidate.day)?.has(module));
+                if (sameModuleToday) score += SAME_MODULE_SAME_DAY_PENALTY;
+
+                const opensNewDay = !!(teachingDays && teachingDays.size > 0 && !teachingDays.has(candidate.day));
+                if (opensNewDay) score += NEW_TEACHING_DAY_PENALTY;
+
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestCandidates = [candidate];
+                } else if (score === bestScore) {
+                    bestCandidates.push(candidate);
+                }
+            }
+
+            // Random tie-break among equally-preferred slots
+            const { day, slot } = bestCandidates[Math.floor(rng() * bestCandidates.length)];
+
+            // Assign the task
+            for (let i = 0; i < duration; i++) {
+                newTimetables[className][day][slot + i] = assignmentId;
+                classTrackers[className][day][slot + i] = assignmentId;
+                personTrackers[mainPerson][day][slot + i] = assignmentId;
+                if (assistPerson) {
+                    personTrackers[assistPerson][day][slot + i] = assignmentId;
+                }
+            }
+            recordMainPlacement(mainPerson, day, taskName);
+
+            if (bestScore >= SAME_MODULE_SAME_DAY_PENALTY) {
+                logger(`  ⚠ Every open slot repeats ${module} for ${mainPerson}; placed on ${DAYS[day]} anyway`, 'warning');
+            }
+            logger(`  ✓ Scheduled on ${DAYS[day]}, slots ${slot + 1} -${slot + duration} `, 'info');
+            scheduled++;
+            placed = true;
         }
 
         if (!placed) {
