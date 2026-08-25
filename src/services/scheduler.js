@@ -1,4 +1,4 @@
-import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY, CLASS_GAP_PENALTY, FRIDAY_PENALTY, FRIDAY_AFTERNOON_START_SLOT, FRIDAY_DAY_INDEX, DEFAULT_EARLIEST_START_SLOT } from '../constants';
+import { DAYS, SLOTS_PER_DAY, LUNCH_OPTIONS, LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID, SAME_MODULE_SAME_DAY_PENALTY, NEW_TEACHING_DAY_PENALTY, CLASS_GAP_PENALTY, FRIDAY_PENALTY, FRIDAY_AFTERNOON_START_SLOT, FRIDAY_DAY_INDEX, DEFAULT_EARLIEST_START_SLOT, LOW_PRIORITY_SPLITTABLE_MODULES, SPLIT_CHUNK_SLOTS } from '../constants';
 import { getSlotLabel } from '../utils/timeUtils';
 import { seededRandom, shuffleArray } from '../utils/randomUtils';
 import { getModuleFromTask } from './assignmentHelper';
@@ -303,19 +303,138 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
         shuffledAssignments = shuffleArray(assignments, rng);
     }
 
-    // Sort by descending task duration (longest first) after shuffling
+    // Sort low-priority/splittable tasks (e.g. IP site visits) to the very end, so
+    // every other module claims its slot first; within each priority tier, sort by
+    // descending task duration (longest first) after shuffling.
+    const isLowPriorityTask = (a) => LOW_PRIORITY_SPLITTABLE_MODULES.includes(getModuleFromTask(a.Task || a.task));
     shuffledAssignments.sort((a, b) => {
+        const aLowPriority = isLowPriorityTask(a);
+        const bLowPriority = isLowPriorityTask(b);
+        if (aLowPriority !== bLowPriority) return aLowPriority ? 1 : -1;
+
         const taskA = tasks.find(t => (t.Name || t.name) === (a.Task || a.task));
         const taskB = tasks.find(t => (t.Name || t.name) === (b.Task || b.task));
         const durationA = taskA ? (taskA.Duration || taskA.duration || 0) : 0;
         const durationB = taskB ? (taskB.Duration || taskB.duration || 0) : 0;
         return durationB - durationA;
     });
-    logger(`  Assignments sorted by descending task duration after shuffle.`);
+    logger(`  Assignments sorted: low-priority/splittable modules last, descending task duration within each tier.`);
 
     let scheduled = 0;
     let failed = 0;
     const unassignedTasks = [];
+
+    const startSlot = allowBefore900 ? 0 : DEFAULT_EARLIEST_START_SLOT;
+    const maxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
+
+    /**
+     * Find and score every open (day, slot) able to fit a block of `duration`
+     * for this class/main/assist, using the same four soft preferences
+     * documented below, and return the chosen one (or null if none exist).
+     * Pure search - does not write to any tracker.
+     */
+    const findBestBlock = (duration, className, mainPerson, assistPerson, taskName) => {
+        const candidates = [];
+        for (let day = 0; day < 5; day++) {
+            const dayMaxSlots = day === FRIDAY_DAY_INDEX ? Math.min(maxSlots, FRIDAY_AFTERNOON_START_SLOT) : maxSlots;
+            for (let slot = startSlot; slot <= dayMaxSlots - duration; slot++) {
+                const classAvailable = checkAvailability(classTrackers[className], day, slot, duration);
+                const mainAvailable = checkAvailability(personTrackers[mainPerson], day, slot, duration);
+                const assistAvailable = assistPerson ? checkAvailability(personTrackers[assistPerson], day, slot, duration) : true;
+
+                if (classAvailable && mainAvailable && assistAvailable) {
+                    candidates.push({ day, slot });
+                }
+            }
+        }
+        if (candidates.length === 0) return null;
+
+        const module = getModuleFromTask(taskName);
+        const teachingDays = mainTeachingDays.get(mainPerson);
+        const modulesByDay = mainModulesByDay.get(mainPerson);
+
+        // Per day, does this class already have any booking? Used below to tell an
+        // isolated (gap-prone) placement apart from the day's first booking, which
+        // can't create a gap since nothing else exists yet to leave a gap from.
+        const classDayHasBooking = {};
+        for (let day = 0; day < 5; day++) {
+            classDayHasBooking[day] = classTrackers[className][day].some(v => v !== 0);
+        }
+
+        let bestScore = Infinity;
+        let bestCandidates = [];
+
+        for (const candidate of candidates) {
+            let score = 0;
+
+            const sameModuleToday = !!(modulesByDay && modulesByDay.get(candidate.day)?.has(module));
+            if (sameModuleToday) score += SAME_MODULE_SAME_DAY_PENALTY;
+
+            const opensNewDay = !!(teachingDays && teachingDays.size > 0 && !teachingDays.has(candidate.day));
+            if (opensNewDay) score += NEW_TEACHING_DAY_PENALTY;
+
+            const dayTrack = classTrackers[className][candidate.day];
+            const leftBusy = candidate.slot > 0 && dayTrack[candidate.slot - 1] !== 0;
+            const rightIdx = candidate.slot + duration;
+            const rightBusy = rightIdx < SLOTS_PER_DAY && dayTrack[rightIdx] !== 0;
+            const createsGap = classDayHasBooking[candidate.day] && !leftBusy && !rightBusy;
+            if (createsGap) score += CLASS_GAP_PENALTY;
+
+            // Any Friday candidate that survives the hard afternoon filter above is,
+            // by definition, a Friday morning (or pre-1pm) slot - discourage it too.
+            if (candidate.day === FRIDAY_DAY_INDEX) score += FRIDAY_PENALTY;
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestCandidates = [candidate];
+            } else if (score === bestScore) {
+                bestCandidates.push(candidate);
+            }
+        }
+
+        // Random tie-break among equally-preferred slots
+        const chosen = bestCandidates[Math.floor(rng() * bestCandidates.length)];
+        return { ...chosen, sameModuleConflict: bestScore >= SAME_MODULE_SAME_DAY_PENALTY };
+    };
+
+    const commitBlock = (day, slot, duration, className, mainPerson, assistPerson, assignmentId, taskName) => {
+        for (let i = 0; i < duration; i++) {
+            newTimetables[className][day][slot + i] = assignmentId;
+            classTrackers[className][day][slot + i] = assignmentId;
+            personTrackers[mainPerson][day][slot + i] = assignmentId;
+            if (assistPerson) {
+                personTrackers[assistPerson][day][slot + i] = assignmentId;
+            }
+        }
+        recordMainPlacement(mainPerson, day, taskName);
+    };
+
+    const releaseBlock = (day, slot, duration, className, mainPerson, assistPerson) => {
+        for (let i = 0; i < duration; i++) {
+            newTimetables[className][day][slot + i] = 0;
+            classTrackers[className][day][slot + i] = 0;
+            personTrackers[mainPerson][day][slot + i] = 0;
+            if (assistPerson) {
+                personTrackers[assistPerson][day][slot + i] = 0;
+            }
+        }
+        // mainTeachingDays/mainModulesByDay entries are intentionally left in place on
+        // rollback - they're monotonic "has this person ever taught X on day Y" markers
+        // for the soft clustering preference; a stale entry only makes that preference
+        // very slightly more conservative afterwards, never incorrect.
+    };
+
+    /** Split `duration` into SPLIT_CHUNK_SLOTS-sized pieces (the last piece takes the remainder). */
+    const splitIntoChunks = (duration) => {
+        const chunks = [];
+        let remaining = duration;
+        while (remaining > 0) {
+            const size = Math.min(SPLIT_CHUNK_SLOTS, remaining);
+            chunks.push(size);
+            remaining -= size;
+        }
+        return chunks;
+    };
 
     // Try to schedule each assignment
     for (const assignment of shuffledAssignments) {
@@ -357,101 +476,60 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
             continue;
         }
 
-        // Collect every open slot for this task, then score each candidate against
-        // four soft preferences: (1) for the Main lecturer, avoid repeating the same
-        // module on one day, (2) for the Main lecturer, cluster their teaching onto as
-        // few days as possible, (3) for the class, avoid leaving a blank period between
-        // sessions on a day that already has bookings, (4) avoid Friday altogether where
-        // possible. Scoring only ranks slots that are already valid, so it never makes a
-        // task unschedulable that would otherwise have fit - if every open slot violates a
-        // preference, the least-bad one is used rather than leaving the task unplaced.
+        // Look for one contiguous block first (works for every task, low-priority or
+        // not) - scored against four soft preferences: (1) for the Main lecturer,
+        // avoid repeating the same module on one day, (2) for the Main lecturer,
+        // cluster their teaching onto as few days as possible, (3) for the class,
+        // avoid leaving a blank period between sessions on a day that already has
+        // bookings, (4) avoid Friday altogether where possible. Scoring only ranks
+        // slots that are already valid, so it never makes a task unschedulable that
+        // would otherwise have fit.
         //
         // Friday afternoon is the one HARD rule (not scored): management wants explicitly
         // no classes there, so a session may not start, or run past, FRIDAY_AFTERNOON_START_SLOT
-        // on a Friday - such placements are excluded from the candidate list entirely and can
-        // leave a task in Unassigned Tasks rather than ever landing there.
+        // on a Friday - such placements are excluded from the candidate list entirely.
         let placed = false;
-        const startSlot = allowBefore900 ? 0 : DEFAULT_EARLIEST_START_SLOT;
-        const maxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
+        const isLowPriority = isLowPriorityTask(assignment);
 
-        const candidates = [];
-        for (let day = 0; day < 5; day++) {
-            const dayMaxSlots = day === FRIDAY_DAY_INDEX ? Math.min(maxSlots, FRIDAY_AFTERNOON_START_SLOT) : maxSlots;
-            for (let slot = startSlot; slot <= dayMaxSlots - duration; slot++) {
-                const classAvailable = checkAvailability(classTrackers[className], day, slot, duration);
-                const mainAvailable = checkAvailability(personTrackers[mainPerson], day, slot, duration);
-                const assistAvailable = assistPerson ? checkAvailability(personTrackers[assistPerson], day, slot, duration) : true;
-
-                if (classAvailable && mainAvailable && assistAvailable) {
-                    candidates.push({ day, slot });
-                }
+        const fullBlock = findBestBlock(duration, className, mainPerson, assistPerson, taskName);
+        if (fullBlock) {
+            commitBlock(fullBlock.day, fullBlock.slot, duration, className, mainPerson, assistPerson, assignmentId, taskName);
+            if (fullBlock.sameModuleConflict) {
+                logger(`  ⚠ Every open slot repeats ${getModuleFromTask(taskName)} for ${mainPerson}; placed on ${DAYS[fullBlock.day]} anyway`, 'warning');
             }
-        }
-
-        if (candidates.length > 0) {
-            const module = getModuleFromTask(taskName);
-            const teachingDays = mainTeachingDays.get(mainPerson);
-            const modulesByDay = mainModulesByDay.get(mainPerson);
-
-            // Per day, does this class already have any booking? Used below to tell an
-            // isolated (gap-prone) placement apart from the day's first booking, which
-            // can't create a gap since nothing else exists yet to leave a gap from.
-            const classDayHasBooking = {};
-            for (let day = 0; day < 5; day++) {
-                classDayHasBooking[day] = classTrackers[className][day].some(v => v !== 0);
-            }
-
-            let bestScore = Infinity;
-            let bestCandidates = [];
-
-            for (const candidate of candidates) {
-                let score = 0;
-
-                const sameModuleToday = !!(modulesByDay && modulesByDay.get(candidate.day)?.has(module));
-                if (sameModuleToday) score += SAME_MODULE_SAME_DAY_PENALTY;
-
-                const opensNewDay = !!(teachingDays && teachingDays.size > 0 && !teachingDays.has(candidate.day));
-                if (opensNewDay) score += NEW_TEACHING_DAY_PENALTY;
-
-                const dayTrack = classTrackers[className][candidate.day];
-                const leftBusy = candidate.slot > 0 && dayTrack[candidate.slot - 1] !== 0;
-                const rightIdx = candidate.slot + duration;
-                const rightBusy = rightIdx < SLOTS_PER_DAY && dayTrack[rightIdx] !== 0;
-                const createsGap = classDayHasBooking[candidate.day] && !leftBusy && !rightBusy;
-                if (createsGap) score += CLASS_GAP_PENALTY;
-
-                // Any Friday candidate that survives the hard afternoon filter above is,
-                // by definition, a Friday morning (or pre-1pm) slot - discourage it too.
-                if (candidate.day === FRIDAY_DAY_INDEX) score += FRIDAY_PENALTY;
-
-                if (score < bestScore) {
-                    bestScore = score;
-                    bestCandidates = [candidate];
-                } else if (score === bestScore) {
-                    bestCandidates.push(candidate);
-                }
-            }
-
-            // Random tie-break among equally-preferred slots
-            const { day, slot } = bestCandidates[Math.floor(rng() * bestCandidates.length)];
-
-            // Assign the task
-            for (let i = 0; i < duration; i++) {
-                newTimetables[className][day][slot + i] = assignmentId;
-                classTrackers[className][day][slot + i] = assignmentId;
-                personTrackers[mainPerson][day][slot + i] = assignmentId;
-                if (assistPerson) {
-                    personTrackers[assistPerson][day][slot + i] = assignmentId;
-                }
-            }
-            recordMainPlacement(mainPerson, day, taskName);
-
-            if (bestScore >= SAME_MODULE_SAME_DAY_PENALTY) {
-                logger(`  ⚠ Every open slot repeats ${module} for ${mainPerson}; placed on ${DAYS[day]} anyway`, 'warning');
-            }
-            logger(`  ✓ Scheduled on ${DAYS[day]}, slots ${slot + 1} -${slot + duration} `, 'info');
+            logger(`  ✓ Scheduled on ${DAYS[fullBlock.day]}, slots ${fullBlock.slot + 1} -${fullBlock.slot + duration} `, 'info');
             scheduled++;
             placed = true;
+        } else if (isLowPriority) {
+            // No single block fits anywhere - this task is allowed to split into
+            // smaller pieces (each independently placed, possibly on different days).
+            // If even one piece can't be placed, roll back whatever pieces did get
+            // placed and report the whole task as unassigned, rather than leaving a
+            // half-scheduled task the UI has no way to represent.
+            const chunkSizes = splitIntoChunks(duration);
+            const committedChunks = [];
+            let anyChunkConflict = false;
+
+            for (const chunkDuration of chunkSizes) {
+                const chunkBlock = findBestBlock(chunkDuration, className, mainPerson, assistPerson, taskName);
+                if (!chunkBlock) break;
+                commitBlock(chunkBlock.day, chunkBlock.slot, chunkDuration, className, mainPerson, assistPerson, assignmentId, taskName);
+                committedChunks.push({ ...chunkBlock, duration: chunkDuration });
+                if (chunkBlock.sameModuleConflict) anyChunkConflict = true;
+            }
+
+            if (committedChunks.length === chunkSizes.length) {
+                if (anyChunkConflict) {
+                    logger(`  ⚠ Every open slot repeats ${getModuleFromTask(taskName)} for ${mainPerson} in at least one piece; placed anyway`, 'warning');
+                }
+                const description = committedChunks.map(c => `${DAYS[c.day]} ${c.slot + 1}-${c.slot + c.duration}`).join(' + ');
+                logger(`  ✓ Scheduled as ${committedChunks.length} split pieces (low-priority/splittable): ${description}`, 'info');
+                scheduled++;
+                placed = true;
+            } else {
+                committedChunks.forEach(c => releaseBlock(c.day, c.slot, c.duration, className, mainPerson, assistPerson));
+                logger(`  ✗ Could not fit even as split pieces`, 'error');
+            }
         }
 
         if (!placed) {
