@@ -28,6 +28,15 @@ export const FRIDAY_PENALTY = 50; // discourage (but don't forbid) using Friday 
 export const FRIDAY_AFTERNOON_START_SLOT = (13 * 60 - START_TIME) / SLOT_DURATION; // 13:00 -> slot 10
 export const FRIDAY_DAY_INDEX = DAYS.indexOf('Friday');
 
+// Modules that represent a lecturer being out of the building (e.g. IP = Internship
+// Programme site visits) rather than an in-room class. What the timetable says for
+// these doesn't matter much in practice, so they: (1) get scheduled last, after every
+// other module has already claimed its slot, so they never crowd out real classes, and
+// (2) may be split across multiple smaller blocks (see SPLIT_CHUNK_SLOTS) instead of
+// needing one big contiguous block, since that's far easier to slot into leftover time.
+export const LOW_PRIORITY_SPLITTABLE_MODULES = ['IP'];
+export const SPLIT_CHUNK_SLOTS = 2; // 1 hour - the piece size a splittable task is broken into if it can't fit as one block
+
 // Color mappings for timetable cells
 export const CELL_COLORS = [
     'bg-blue-200',
