@@ -32,6 +32,7 @@ const App = () => {
     tasks,
     immutableSlots,
     handleFileUpload,
+    handleExcelUpload,
     loadSampleData,
     setAssignments,
     setPersons,
@@ -251,8 +252,8 @@ const App = () => {
             Weekly Resource Scheduler
           </h1>
           <div className="flex flex-col items-end text-right">
-            <span className="text-sm font-semibold text-gray-700">Shaun Yu</span>
-            <span className="text-xs text-gray-500">v1.6.03</span>
+            <span className="text-sm font-semibold text-gray-700">Syazwan Hanif</span>
+            <span className="text-xs text-gray-500">Updated 25 Aug 2026</span>
           </div>
         </div>
 
@@ -264,6 +265,7 @@ const App = () => {
           tasks={tasks}
           immutableSlots={immutableSlots}
           onFileUpload={handleFileUpload}
+          onExcelUpload={handleExcelUpload}
         />
 
         {/* Assignments Grid */}
