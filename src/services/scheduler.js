@@ -88,21 +88,55 @@ export const initializeTrackers = (classes, persons, assignments, logger) => {
 };
 
 /**
- * Apply a random lunch break to all trackers. The same lunch slot is used for
- * every day of the week (not re-picked per day), and for every class and every
- * person, so the whole team is free to eat lunch together at the same time each day.
+ * Apply a lunch break to all trackers. For each day, every candidate lunch
+ * position (LUNCH_OPTIONS) is scored by how much usable room it leaves on both
+ * sides relative to the longest pending task duration, and the best-fitting one
+ * is chosen - so real sessions can still land cleanly before AND after lunch,
+ * rather than lunch landing wherever and boxing a session out. The lunch time
+ * can differ day-to-day (each day's own available-time shape may call for a
+ * different split), but every class and every person still shares the same
+ * lunch slot as each other WITHIN a given day, so the whole team is still free
+ * to eat together at the same time.
  * @param {Object} classTrackers - Class availability trackers
  * @param {Object} personTrackers - Person availability trackers
  * @param {Object} timetables - Timetable data
+ * @param {Array} tasks - List of tasks, used to find the longest pending duration
  * @param {Function} logger - Logging function
+ * @param {boolean} allowBeyond530 - Whether sessions may run past 17:30
+ * @param {boolean} allowBefore900 - Whether sessions may start before 09:00
  * @returns {Object} Lunch break configuration by day
  */
-export const applyLunchBreaks = (classTrackers, personTrackers, timetables, logger) => {
+export const applyLunchBreaks = (classTrackers, personTrackers, timetables, tasks, logger, allowBeyond530 = false, allowBefore900 = false) => {
     const lunchBreaks = {};
 
-    // Choose one lunch slot and reuse it Monday-Friday
-    const lunchSlots = LUNCH_OPTIONS[Math.floor(Math.random() * LUNCH_OPTIONS.length)];
+    const dayStartSlot = allowBefore900 ? 0 : DEFAULT_EARLIEST_START_SLOT;
+    const dayMaxSlots = allowBeyond530 ? SLOTS_PER_DAY : 19;
+    const longestTaskDuration = tasks.reduce((max, t) => Math.max(max, Number(t.Duration || t.duration) || 0), 0);
+
     for (let day = 0; day < 5; day++) {
+        // Friday afternoon is off-limits to real sessions (see the hard rule below),
+        // so there's no point leaving "after lunch" room past that cutoff there.
+        const dayEnd = day === FRIDAY_DAY_INDEX ? Math.min(dayMaxSlots, FRIDAY_AFTERNOON_START_SLOT) : dayMaxSlots;
+
+        let bestBadness = Infinity;
+        let bestOptions = [];
+        for (const option of LUNCH_OPTIONS) {
+            const [lunchStart, lunchEndSlot] = option;
+            const roomBefore = lunchStart - dayStartSlot;
+            const roomAfter = dayEnd - (lunchEndSlot + 1);
+            // How far short each side falls of fitting the longest pending task - 0 if
+            // both sides already comfortably fit it, higher is worse.
+            const badness = Math.max(0, longestTaskDuration - roomBefore) + Math.max(0, longestTaskDuration - roomAfter);
+
+            if (badness < bestBadness) {
+                bestBadness = badness;
+                bestOptions = [option];
+            } else if (badness === bestBadness) {
+                bestOptions.push(option);
+            }
+        }
+
+        const lunchSlots = bestOptions[Math.floor(Math.random() * bestOptions.length)];
         lunchBreaks[day] = lunchSlots;
         logger(`${DAYS[day]} lunch break: slots ${lunchSlots[0] + 1} -${lunchSlots[1] + 1} (${getSlotLabel(lunchSlots[0])} to ${getSlotLabel(lunchSlots[1])})`);
     }
@@ -219,7 +253,7 @@ export const attemptSchedule = (assignments, tasks, classes, persons, immutableS
     };
 
     // Apply lunch breaks
-    applyLunchBreaks(classTrackers, personTrackers, newTimetables, logger);
+    applyLunchBreaks(classTrackers, personTrackers, newTimetables, tasks, logger, allowBeyond530, allowBefore900);
 
     // Apply immutable slots
     applyImmutableSlots(immutableSlots, classTrackers, newTimetables, logger);
