@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { parseCSV } from '../utils/csvParser';
+import { extractTimetableFromFile } from '../utils/excelExtractor';
 import { IMMUTABLE_SLOT_ID } from '../constants';
 
 /**
@@ -91,6 +92,39 @@ export const useCSVData = (addLog) => {
         );
     }, [addLog]);
 
+    /**
+     * Upload the raw planning workbook (.xlsx) directly - runs the same
+     * extraction extract_timetable.py used to do, in-browser, and populates
+     * all 5 datasets at once instead of requiring 5 separate CSV uploads.
+     */
+    const handleExcelUpload = useCallback((e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        extractTimetableFromFile(file)
+            .then(({ tasks: extractedTasks, assignments: extractedAssignments, persons: extractedPersons, classes: extractedClasses, immutableSlots: extractedImmutables, warnings }) => {
+                if (extractedAssignments.length >= IMMUTABLE_SLOT_ID) {
+                    alert(`The planner can only deal with less than ${IMMUTABLE_SLOT_ID} assignments`);
+                    return;
+                }
+
+                setTasks(extractedTasks);
+                setAssignments(extractedAssignments);
+                setPersons(extractedPersons);
+                setClasses(extractedClasses);
+                setImmutableSlots(extractedImmutables);
+
+                addLog(
+                    `Extracted from ${file.name}: ${extractedTasks.length} tasks, ${extractedAssignments.length} assignments, ` +
+                    `${extractedPersons.length} persons, ${extractedClasses.length} classes, ${extractedImmutables.length} immutable slots`
+                );
+                warnings.forEach((w) => addLog(w, 'warning'));
+            })
+            .catch((err) => {
+                addLog(`Error extracting ${file.name}: ${err.message}`, 'error');
+            });
+    }, [addLog]);
+
     const loadSampleData = useCallback(() => {
         setAssignments(SAMPLE_DATA.assignments);
         setPersons(SAMPLE_DATA.persons);
@@ -106,6 +140,7 @@ export const useCSVData = (addLog) => {
         tasks,
         immutableSlots,
         handleFileUpload,
+        handleExcelUpload,
         loadSampleData,
         setAssignments,
         setPersons,
