@@ -20,6 +20,13 @@ export const IMMUTABLE_SLOT_ID = 100;
 export const SAME_MODULE_SAME_DAY_PENALTY = 1000; // discourage a Main lecturer teaching the same module twice in one day
 export const NEW_TEACHING_DAY_PENALTY = 20; // discourage opening a new teaching day for a Main lecturer when an existing day still has room
 export const CLASS_GAP_PENALTY = 15; // discourage leaving a blank period between a class's sessions on a day that already has bookings
+export const FRIDAY_PENALTY = 50; // discourage (but don't forbid) using Friday at all, per management's "ideally no Friday morning" request
+
+// Friday afternoon is a hard rule, not a preference: no session may start, or run
+// past, this slot on a Friday - management said "explicitly no classes" here, so
+// this is used as a candidate filter, not a score, and can leave tasks unscheduled.
+export const FRIDAY_AFTERNOON_START_SLOT = (13 * 60 - START_TIME) / SLOT_DURATION; // 13:00 -> slot 10
+export const FRIDAY_DAY_INDEX = DAYS.indexOf('Friday');
 
 // Color mappings for timetable cells
 export const CELL_COLORS = [
