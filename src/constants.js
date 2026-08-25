@@ -8,6 +8,10 @@ export const START_TIME = 8 * 60; // 08:00 in minutes from midnight
 export const LUNCH_OPTIONS = [[8, 9], [9, 10], [10, 11]];
 export const LUNCH_BREAK_ID = 101;
 
+// Earliest slot classes may start at by default (slot 2 = 09:00). Sessions before
+// 9am tend to have low attendance; the "Before 9:00AM" toggle overrides this to slot 0 (08:00).
+export const DEFAULT_EARLIEST_START_SLOT = 2;
+
 // Immutable slot ID threshold
 export const IMMUTABLE_SLOT_ID = 100;
 
@@ -15,6 +19,7 @@ export const IMMUTABLE_SLOT_ID = 100;
 // are already valid, so they can never make a task unschedulable by themselves)
 export const SAME_MODULE_SAME_DAY_PENALTY = 1000; // discourage a Main lecturer teaching the same module twice in one day
 export const NEW_TEACHING_DAY_PENALTY = 20; // discourage opening a new teaching day for a Main lecturer when an existing day still has room
+export const CLASS_GAP_PENALTY = 15; // discourage leaving a blank period between a class's sessions on a day that already has bookings
 
 // Color mappings for timetable cells
 export const CELL_COLORS = [

@@ -25,8 +25,8 @@ const TimetableViewer = ({
     onUpdateTimetables,
     allowBeyond530,
     onAllowBeyond530Change,
-    allowBefore830,
-    onAllowBefore830Change,
+    allowBefore900,
+    onAllowBefore900Change,
     unassignedTasks = [],
     onUpdateUnassignedTasks,
     lockedAssignmentIds = new Set(),
@@ -611,13 +611,13 @@ const TimetableViewer = ({
                     <div className="flex items-center gap-2 ml-4">
                         <input
                             type="checkbox"
-                            id="allowBefore830"
-                            checked={allowBefore830}
-                            onChange={(e) => onAllowBefore830Change(e.target.checked)}
+                            id="allowBefore900"
+                            checked={allowBefore900}
+                            onChange={(e) => onAllowBefore900Change(e.target.checked)}
                             className="rounded border-gray-300 transform scale-125 cursor-pointer"
                         />
-                        <label htmlFor="allowBefore830" className="text-sm font-medium text-gray-700 cursor-pointer whitespace-nowrap">
-                            Before 8:30AM
+                        <label htmlFor="allowBefore900" className="text-sm font-medium text-gray-700 cursor-pointer whitespace-nowrap">
+                            Before 9:00AM
                         </label>
                     </div>
 
