@@ -119,6 +119,7 @@ const App = () => {
     timetables,
     successfulAttempt,
     allScheduled,
+    hasScheduleData,
     maxRetries,
     setMaxRetries,
     randomSeed,
@@ -290,6 +291,7 @@ const App = () => {
             onSaveState={handleSaveState}
             onLoadState={handleLoadState}
             allScheduled={allScheduled}
+            hasScheduleData={hasScheduleData}
             successfulAttempt={successfulAttempt}
           />
         </div>

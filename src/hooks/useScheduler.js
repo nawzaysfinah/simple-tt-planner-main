@@ -116,13 +116,21 @@ export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond5
 
     }, [assignments, tasks, classes, persons, immutableSlots, maxRetries, randomSeed, addLog, allowBeyond530, allowBefore900, disabledAssignmentIds, lockedAssignmentIds]);
 
+    // Exporting only needs SOME timetable data to have been generated - it does not
+    // require a perfect (allScheduled) run. A partial schedule still exports fine,
+    // just with blank cells wherever a task didn't get placed.
+    const hasScheduleData = Object.keys(timetables).length > 0;
+
     const handleExport = useCallback(() => {
-        if (!allScheduled || successfulAttempt === null) {
-            addLog('Cannot export - no successful schedule available', 'error');
+        if (!hasScheduleData) {
+            addLog('Cannot export - generate a schedule first', 'error');
             return;
         }
 
         addLog('Exporting timetables...');
+        if (!allScheduled) {
+            addLog(`⚠ Exporting a partial schedule - ${unassignedTasks.length} task(s) are unassigned and will show as blank cells`, 'warning');
+        }
         exportTimetables(
             timetables,
             classes,
@@ -131,16 +139,16 @@ export const useScheduler = (csvData, addLog, getAssignmentDetails, allowBeyond5
             getAssignmentDetails,
             getSlotLabel,
             (classCount, personCount) => {
-                addLog(`✓ Exported all timetables to single file: attempt-${successfulAttempt}-all-timetables.txt`);
-                addLog(`Contains ${classCount} class timetables and ${personCount} person timetables`);
+                addLog(`✓ Exported all timetables to a single .xlsx file (${classCount} class tabs, ${personCount} staff tabs)`);
             }
         );
-    }, [allScheduled, successfulAttempt, timetables, classes, persons, getAssignmentDetails, addLog]);
+    }, [hasScheduleData, allScheduled, successfulAttempt, timetables, classes, persons, unassignedTasks, getAssignmentDetails, addLog]);
 
     return {
         timetables,
         successfulAttempt,
         allScheduled,
+        hasScheduleData,
         maxRetries,
         setMaxRetries,
         randomSeed,
