@@ -10,6 +10,7 @@ import { Download } from 'lucide-react';
  * @param {Function} props.onLoadSampleData - Handler for sample data button
  * @param {Function} props.onExport - Handler for export button
  * @param {boolean} props.allScheduled - Whether all assignments are scheduled
+ * @param {boolean} props.hasScheduleData - Whether a schedule (complete or partial) has been generated
  * @param {number|null} props.successfulAttempt - Successful attempt number
  */
 const ControlPanel = ({
@@ -23,6 +24,7 @@ const ControlPanel = ({
     onSaveState,
     onLoadState,
     allScheduled,
+    hasScheduleData,
     successfulAttempt
 }) => {
     const handleLoadStateClick = async (e) => {
@@ -87,15 +89,18 @@ const ControlPanel = ({
                 >
                     Load Sample Data
                 </button>
-                {allScheduled && (
-                    <button
-                        onClick={onExport}
-                        className="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition font-medium flex items-center gap-2"
-                    >
-                        <Download className="w-4 h-4" />
-                        Export All Timetables (XLSX)
-                    </button>
-                )}
+                <button
+                    onClick={onExport}
+                    disabled={!hasScheduleData}
+                    title={hasScheduleData ? 'One file: a tab per class, a tab per staff member' : 'Generate a schedule first'}
+                    className={`px-6 py-2 rounded transition font-medium flex items-center gap-2 ${hasScheduleData
+                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                >
+                    <Download className="w-4 h-4" />
+                    Export All Timetables (XLSX)
+                </button>
 
                 {/* Save/Load State Buttons */}
                 <div className="border-l pl-4 flex gap-4">
@@ -126,6 +131,12 @@ const ControlPanel = ({
             {allScheduled && successfulAttempt !== null && (
                 <div className="bg-green-50 border border-green-200 rounded p-3 text-green-800 text-sm">
                     ✓ All assignments successfully scheduled on attempt {successfulAttempt + 1}! Ready to export.
+                </div>
+            )}
+            {hasScheduleData && !allScheduled && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-yellow-800 text-sm">
+                    ⚠ Not every assignment could be scheduled (see Unassigned Tasks below). You can still export -
+                    unplaced tasks just show as blank cells.
                 </div>
             )}
         </div>
