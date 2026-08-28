@@ -120,7 +120,7 @@ const TimetableGrid = ({
                                                     ${selectedCell && selectedCell.day === dayIdx && selectedCell.slot === slot ? 'ring-2 ring-inset ring-blue-500 z-10' : ''}
                                                     ${highlightedSlots.some(s => s.day === dayIdx && s.slot === slot) ? '!bg-green-50 !ring-2 !ring-green-600 !ring-inset animate-pulse' : ''}
                                                 `}
-                                                title={details && !shouldHide ? (details.isImmutable ? `${details.Task}${details.Names ? `\nNames: ${details.Names}` : ''}${details.Venue ? `\nVenue: ${details.Venue}` : ''}` : !details.isLunch ? `${details.Task}\nClass: ${details.Class}\nMain: ${details.Main}\nAssist: ${details.Assist}` : details.Task) : ''}
+                                                title={details && !shouldHide ? (details.isImmutable ? `${details.Task}${details.Names ? `\nNames: ${details.Names}` : ''}${details.Venue ? `\nVenue: ${details.Venue}` : ''}` : !details.isLunch ? `${details.Task}\nClass: ${details.Class}\nMain: ${details.Main}\nAssist: ${details.Assist}${details.Venue ? `\nVenue: ${details.Venue}` : ''}` : details.Task) : ''}
                                                 style={{ height: hasContent ? 'auto' : '2rem' }}
                                                 onClick={() => !mergeCells && !isPersonView && (isEditMode || !isLunch) && onCellClick(dayIdx, slot, assignmentId)}
                                                 draggable={isDraggableCell}
@@ -157,7 +157,7 @@ const TimetableGrid = ({
                                                         {details.isImmutable && details.Names && (
                                                             <div className="text-xs text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">{details.Names}</div>
                                                         )}
-                                                        {details.isImmutable && details.Venue && (
+                                                        {details.Venue && (
                                                             <div className="text-xs text-gray-700 font-medium whitespace-nowrap overflow-hidden text-ellipsis">{details.Venue}</div>
                                                         )}
                                                     </div>

@@ -78,9 +78,11 @@ const formatCell = (assignmentId, resourceName, isPersonView, getAssignmentDetai
     else if (isPersonView) {
         // Task, Role, Class
         text = `${details.Task}\r\n${details.Role}\r\n${details.Class}`;
+        if (details.Venue) text += `\r\n${details.Venue}`;
     } else {
         // Task, Main, Assist
         text = `${details.Task}\r\nM:${details.Main}\r\nA:${details.Assist}`;
+        if (details.Venue) text += `\r\n${details.Venue}`;
     }
 
     const hexColor = getCellHexColor(assignmentId, details);
@@ -185,9 +187,10 @@ export const exportTimetables = async (timetables, classes, persons, successfulA
         for (let i = 0; i < SLOTS_PER_DAY; i++) wscols.push({ wch: 20 }); // Slot columns
         ws['!cols'] = wscols;
 
-        // Apply Row Heights (Height for 3 lines of text + padding)
+        // Apply Row Heights (Height for up to 4 lines of text + padding - a cell can
+        // show Task/Main/Assist (or Task/Role/Class) plus a Venue line)
         const rowHeights = [{ hpt: 30 }]; // Header row
-        for (let i = 0; i < DAYS.length; i++) rowHeights.push({ hpt: 60 });
+        for (let i = 0; i < DAYS.length; i++) rowHeights.push({ hpt: 78 });
         ws['!rows'] = rowHeights;
 
         const safeName = className.substring(0, 31).replace(/[\\/?*[\]]/g, '_');
@@ -207,7 +210,7 @@ export const exportTimetables = async (timetables, classes, persons, successfulA
         }
 
         const rowHeights = [{ hpt: 30 }];
-        for (let i = 0; i < DAYS.length; i++) rowHeights.push({ hpt: 60 });
+        for (let i = 0; i < DAYS.length; i++) rowHeights.push({ hpt: 78 });
         ws['!rows'] = rowHeights;
 
         const wscols = [{ wch: 15 }];
