@@ -4,10 +4,12 @@ import { LUNCH_BREAK_ID, IMMUTABLE_SLOT_ID } from '../constants';
  * Get assignment details with role information
  * @param {number} assignmentId - Assignment ID
  * @param {Array} assignments - List of all assignments
+ * @param {Array} immutableSlots - List of immutable slots (each carries its own explicit Venue)
+ * @param {Array} classes - List of classes (each carries the one Venue used for all its regular sessions)
  * @param {string|null} personView - Person name if viewing from person perspective
  * @returns {Object|null} Assignment details or null
  */
-export const getAssignmentDetails = (assignmentId, assignments, immutableSlots = [], personView = null) => {
+export const getAssignmentDetails = (assignmentId, assignments, immutableSlots = [], classes = [], personView = null) => {
     if (assignmentId === 0) return null;
     if (assignmentId === LUNCH_BREAK_ID) {
         return { Task: 'LUNCH BREAK', Main: '-', Assist: '-', Class: '-', isLunch: true };
@@ -16,6 +18,7 @@ export const getAssignmentDetails = (assignmentId, assignments, immutableSlots =
         const immutable = immutableSlots ? immutableSlots.find(s => (s.id || s.ID) === assignmentId) : null;
         const taskName = immutable ? (immutable.Task || immutable.task || 'IMMUTABLE') : 'IMMUTABLE';
         const names = immutable ? (immutable.Names || immutable.names) : undefined;
+        // Immutable slots move around, so their venue is keyed in explicitly per row.
         const venue = immutable ? (immutable.Venue || immutable.venue) : undefined;
         return { Task: taskName, Main: '-', Assist: '-', Class: '-', Names: names, Venue: venue, isImmutable: true };
     }
@@ -23,11 +26,18 @@ export const getAssignmentDetails = (assignmentId, assignments, immutableSlots =
     const assignment = assignments.find(a => (a.id || a.ID) === assignmentId);
     if (!assignment) return null;
 
+    const className = assignment.Class || assignment.class;
+    // Regular (staff-led) sessions use one consistent venue per class, rather
+    // than a venue keyed in per session.
+    const classInfo = classes.find(c => (c.Name || c.name) === className);
+    const venue = classInfo ? (classInfo.Venue || classInfo.venue) : undefined;
+
     const details = {
         Task: assignment.Task || assignment.task,
         Main: assignment.Main || assignment.main,
         Assist: assignment.Assist || assignment.assist,
-        Class: assignment.Class || assignment.class
+        Class: className,
+        Venue: venue
     };
 
     // If viewing from person perspective, add their role

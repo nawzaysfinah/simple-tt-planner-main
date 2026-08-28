@@ -22,6 +22,12 @@ const COL_THY = 'THY';
 const COL_PRA = 'PRA';
 const COL_MAIN = 'Main Lecturer';
 const COL_ASSIST = 'Assist Lecturer';
+// Optional: a class's regular (non-immutable) venue, entered once at the top of
+// its block and forward-filled exactly like Class Name - the plan is that every
+// staff-led session for a class happens in the same room, so only immutable
+// slots (which genuinely move around) need a venue keyed in per row. A workbook
+// that doesn't have this column yet just yields an empty Venue for every class.
+const COL_VENUE = 'Venue';
 
 const IMMUTABLE_ID_START = 110;
 
@@ -124,14 +130,18 @@ export const extractTimetableFromWorkbook = (arrayBuffer) => {
     const { headers, rows } = sheetToNormalizedRows(workbook.Sheets[SHEET_TIMETABLE]);
     assertColumnsPresent(SHEET_TIMETABLE, headers, [COL_CLASS, COL_ABBR, COL_THY, COL_PRA, COL_MAIN, COL_ASSIST]);
 
-    // Forward-fill Class Name across ALL rows first (merged-cell style), then
-    // filter down to real module rows - same order of operations as the
-    // Python script, since filtering first would break the fill.
+    // Forward-fill Class Name (and Venue, if present) across ALL rows first
+    // (merged-cell style), then filter down to real module rows - same order
+    // of operations as the Python script, since filtering first would break
+    // the fill.
     let lastClassName = '';
+    let lastVenue = '';
     const filledRows = rows.map((row) => {
-        const raw = cellToStr(row[COL_CLASS]);
-        if (raw) lastClassName = raw;
-        return { ...row, [COL_CLASS]: lastClassName };
+        const rawClass = cellToStr(row[COL_CLASS]);
+        if (rawClass) lastClassName = rawClass;
+        const rawVenue = cellToStr(row[COL_VENUE]);
+        if (rawVenue) lastVenue = rawVenue;
+        return { ...row, [COL_CLASS]: lastClassName, [COL_VENUE]: lastVenue };
     });
 
     const moduleRows = filledRows.filter((row) => {
@@ -143,12 +153,14 @@ export const extractTimetableFromWorkbook = (arrayBuffer) => {
     const rowsAssign = [];
     const seenPersons = [];
     const seenClasses = [];
+    const classVenues = {}; // className -> Venue (first occurrence wins, same as Class Name's block-start value)
     let runningNum = 1;
 
     moduleRows.forEach((row, rowIdx) => {
         const excelRow = rowIdx + 1; // sequential position among kept rows, matching the Python script's numbering
         const abbr = cellToStr(row[COL_ABBR]);
         const className = cellToStr(row[COL_CLASS]);
+        const venue = cellToStr(row[COL_VENUE]);
         const mainLec = cellToStr(row[COL_MAIN]);
         const assistLec = cellToStr(row[COL_ASSIST]);
 
@@ -156,6 +168,7 @@ export const extractTimetableFromWorkbook = (arrayBuffer) => {
             if (name && !seenPersons.includes(name)) seenPersons.push(name);
         });
         if (className && !seenClasses.includes(className)) seenClasses.push(className);
+        if (className && classVenues[className] === undefined) classVenues[className] = venue;
 
         const thySlots = parseSlots(row[COL_THY]);
         const praSlots = parseSlots(row[COL_PRA]);
@@ -217,7 +230,7 @@ export const extractTimetableFromWorkbook = (arrayBuffer) => {
     }).filter((row) => row.Class); // skip fully blank trailing rows
 
     const persons = seenPersons.map((name, i) => ({ id: `p${i + 1}`, Name: name }));
-    const classes = seenClasses.map((name, i) => ({ id: `c${i + 1}`, Name: name }));
+    const classes = seenClasses.map((name, i) => ({ id: `c${i + 1}`, Name: name, Venue: classVenues[name] || '' }));
 
     return {
         tasks: rowsTasks,

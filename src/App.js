@@ -101,10 +101,10 @@ const App = () => {
     [assignments, enabledAssignmentIds]
   );
 
-  // Wrapper function for getAssignmentDetails to bind assignments and immutableSlots
+  // Wrapper function for getAssignmentDetails to bind assignments, immutableSlots and classes
   const getDetails = useCallback((assignmentId, personView = null) => {
-    return getAssignmentDetails(assignmentId, assignments, immutableSlots, personView);
-  }, [assignments, immutableSlots]);
+    return getAssignmentDetails(assignmentId, assignments, immutableSlots, classes, personView);
+  }, [assignments, immutableSlots, classes]);
 
   // Initialize scheduler — use a csvData-like object with filtered assignments
   const filteredCsvData = useMemo(() => ({
